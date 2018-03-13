@@ -3,6 +3,7 @@ package com.example.android.lidarlitev3;
 import ioio.lib.api.DigitalOutput;
 import ioio.lib.api.IOIO;
 import ioio.lib.api.IOIO.VersionType;
+import ioio.lib.api.PulseInput;
 import ioio.lib.api.TwiMaster;
 import ioio.lib.api.exception.ConnectionLostException;
 import ioio.lib.util.BaseIOIOLooper;
@@ -47,6 +48,13 @@ public class MainActivity extends IOIOActivity {
 
     private byte[] empy_read = new byte[] {};
 
+    private DigitalOutput trigger_port;
+    private PulseInput monitor_port;
+
+    int trigger_pin = 38;
+    int monitor_pin = 40;
+    float pulseDistance;
+
     /**
      * Called when the activity is first created. Here we normally initialize
      * our GUI.
@@ -77,10 +85,13 @@ public class MainActivity extends IOIOActivity {
         @Override
         protected void setup() throws ConnectionLostException, InterruptedException {
             showVersions(ioio_, "IOIO connected!");
-            twi = ioio_.openTwiMaster(1, TwiMaster.Rate.RATE_100KHz, false);
+//            twi = ioio_.openTwiMaster(1, TwiMaster.Rate.RATE_100KHz, false);
+
+            trigger_port = ioio_.openDigitalOutput(trigger_pin, false);
+            monitor_port = ioio_.openPulseInput(monitor_pin, PulseInput.PulseMode.POSITIVE);
 
             //configure for default mode, balanced performance
-            configure(LIDAR_ADDRESS,0);
+//            configure(LIDAR_ADDRESS,0);
             //Thread.sleep(100);
             enableUi(true);
         }
@@ -99,6 +110,13 @@ public class MainActivity extends IOIOActivity {
         public void loop() throws ConnectionLostException, InterruptedException {
             Log.i("LIDAR","---loop start---");
 
+            // getDuration returns pulse width in seconds; 10us = 1cm
+            // getDurations [s] * (1000000 us / 1s) * (1 cm / 10 us) * (1E-3 km / 1E2 cm) = 1 km
+            pulseDistance = monitor_port.getDuration();
+
+            Log.i("DISTANCE","" + pulseDistance + " km");
+
+/*
             if (cal_cnt == 0) {
                 dis = distance(LIDAR_ADDRESS,true);	//Measurement w/ bias correction
                 //Log.i("MEASURED","bias");
@@ -114,6 +132,7 @@ public class MainActivity extends IOIOActivity {
             //Display distance reading
             Log.i("DISTANCE","" + dis + " cm");
             Thread.sleep(10);
+*/
         }
 
         /**
@@ -123,7 +142,8 @@ public class MainActivity extends IOIOActivity {
          */
         @Override
         public void disconnected() {
-            twi.close();
+//            twi.close();
+            monitor_port.close();
             enableUi(false);
             toast("IOIO disconnected");
         }
@@ -182,6 +202,30 @@ public class MainActivity extends IOIOActivity {
 
             }
         });
+    }
+
+    // Takes latitude & longitude of current position (degree minutes, dm), sensor distance reading
+    // (km), trueCourse (rad); Returns GPS coords as dm
+    double[] calculateMannequinnGpsCoordinates(double lat_dm, double lon_dm, double distance_km, double trueCourse_rad) {
+        double lat_rad = lat_dm * Math.PI / 180;
+        double lon_rad = lon_dm * Math.PI / 180;
+        double distance_rad = distance_km / 6371;       //6371 is the Earth's radius in km
+
+
+        double lat = Math.asin(Math.sin(lat_rad)*Math.cos(distance_rad) + Math.cos(lat_rad)*Math.sin(distance_rad)*Math.cos(trueCourse_rad));
+        double lon;
+
+        if (Math.cos(lat) == 0) {
+            lon = lon_rad;
+        } else {
+            lon = (((lon_rad - Math.asin(Math.sin(trueCourse_rad)*Math.sin(distance_rad) / Math.cos(lat))) + Math.PI) % (2*Math.PI)) - Math.PI;
+        }
+
+        lat = Math.toDegrees(lat);
+        lon = Math.toDegrees(lon);
+
+        double[] gps = {lat,lon};
+        return gps;
     }
 
     /*------------------------------------------------------------------------------
